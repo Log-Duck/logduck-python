@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "logduck"
+dynamic = ["version"]
+description = "Official Python SDK for LogDuck event logging and notifications"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [{ name = "LogDuck" }]
+keywords = ["logging", "events", "notifications", "logduck", "observability"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Logging",
+    "Typing :: Typed",
+]
+dependencies = ["httpx>=0.24"]
+
+[project.urls]
+Homepage = "https://logduck.com"
+Source = "https://github.com/Log-Duck/logduck-python"
+Issues = "https://github.com/Log-Duck/logduck-python/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-asyncio>=0.23",
+    "respx>=0.20",
+    "mypy>=1.8",
+    "ruff>=0.6",
+]
+
+[tool.hatch.version]
+path = "src/logduck/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/logduck"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# `X | None` is only a string under `from __future__ import annotations`, so it
+# would parse fine on 3.9 — but typing.get_type_hints() cannot evaluate it
+# there, which breaks any caller that introspects our signatures (FastAPI and
+# pydantic both do). Explicit Optional stays until the floor moves to 3.10.
+ignore = ["UP007", "UP045"]
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+files = ["src"]

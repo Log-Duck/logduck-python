@@ -1,0 +1,115 @@
+# Publishes the package to PyPI.
+#
+#   git tag v1.1.0 && git push origin v1.1.0
+#
+# Uses PyPI trusted publishing: the job proves its identity to PyPI with a
+# short-lived OIDC token issued by GitHub for this repository, workflow and
+# environment. No API token is stored in this repository, so there is nothing
+# here to leak or rotate.
+#
+# Configure it once at https://pypi.org/manage/account/publishing/ — for a
+# project that does not exist yet, add a *pending* publisher with:
+#   PyPI project name : logduck
+#   Owner             : Log-Duck
+#   Repository        : logduck-python
+#   Workflow          : publish.yml
+#   Environment       : pypi
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Resolve and check the version
+        id: version
+        run: |
+          # __init__.py is the single source of truth; hatch reads the package
+          # version from it too, so this cannot disagree with what gets built.
+          v=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/logduck/__init__.py)
+          if [[ -z "$v" ]]; then
+            echo "::error::No __version__ found in src/logduck/__init__.py."
+            exit 1
+          fi
+
+          # A manual run has no tag to check against.
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME#v}"
+            if [[ "$tag" != "$v" ]]; then
+              echo "::error::Tag says $tag but __version__ is $v. Bump the source and re-tag."
+              exit 1
+            fi
+          fi
+
+          echo "Publishing version $v"
+          echo "value=$v" >> "$GITHUB_OUTPUT"
+
+      # A PyPI version can never be replaced, only yanked, so finding this out
+      # after the build is finding it out too late.
+      - name: Refuse to republish an existing version
+        run: |
+          v="${{ steps.version.outputs.value }}"
+          code=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/logduck/$v/json")
+          if [[ "$code" == "200" ]]; then
+            echo "::error::logduck $v is already on PyPI. Versions there are immutable — bump and re-tag."
+            exit 1
+          fi
+          echo "Version $v is free (PyPI answered $code)."
+
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: mypy
+      - run: pytest -q
+
+      - name: Build the distributions
+        run: |
+          pip install build
+          python -m build
+
+      # twine catches metadata PyPI would reject at upload time, which is
+      # cheaper to learn here than halfway through a release.
+      - name: Check the metadata
+        run: |
+          pip install twine
+          twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The environment name is part of what PyPI matches the OIDC token
+    # against, so it has to agree with the trusted publisher configuration.
+    environment: pypi
+    permissions:
+      # Required for trusted publishing. Nothing else in this job needs a token.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
