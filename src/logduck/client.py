@@ -26,6 +26,7 @@ _LIMITS = {
     "source": 200,
     "subject": 500,
     "session_id": 256,
+    "message": 500,
     "emoji": 10,
 }
 
@@ -101,6 +102,7 @@ class _BaseClient:
         type: str,
         subject: Optional[str],
         session_id: Optional[str],
+        message: Optional[str],
         emoji: Optional[str],
     ) -> Optional[str]:
         if not type or not type.strip():
@@ -115,6 +117,8 @@ class _BaseClient:
             return f"subject exceeds {_LIMITS['subject']} characters"
         if session_id is not None and len(session_id) > _LIMITS["session_id"]:
             return f"session_id exceeds {_LIMITS['session_id']} characters"
+        if message is not None and len(message) > _LIMITS["message"]:
+            return f"message exceeds {_LIMITS['message']} characters"
         if emoji is not None and len(emoji) > _LIMITS["emoji"]:
             return f"emoji exceeds {_LIMITS['emoji']} characters"
         return None
@@ -124,6 +128,7 @@ class _BaseClient:
         type: str,
         subject: Optional[str],
         session_id: Optional[str],
+        message: Optional[str],
         time: Optional[Union[datetime, str]],
         data: Optional[Mapping[str, Any]],
         emoji: Optional[str],
@@ -135,7 +140,12 @@ class _BaseClient:
         if subject is not None:
             payload["subject"] = subject
         if session_id is not None:
-            payload["sessionId"] = session_id
+            # Lowercase on the wire: a CloudEvents extension attribute name must
+            # be lowercase alphanumeric, and the server discards what it does
+            # not recognise rather than erroring.
+            payload["sessionid"] = session_id
+        if message is not None:
+            payload["message"] = message
         if time is not None:
             payload["time"] = time.isoformat() if isinstance(time, datetime) else time
         if data is not None:
@@ -228,6 +238,7 @@ class LogDuckClient(_BaseClient):
         *,
         subject: Optional[str] = None,
         session_id: Optional[str] = None,
+        message: Optional[str] = None,
         time: Optional[Union[datetime, str]] = None,
         data: Optional[Mapping[str, Any]] = None,
         emoji: Optional[str] = None,
@@ -237,7 +248,7 @@ class LogDuckClient(_BaseClient):
         Returns the created event, or ``None`` when the send failed and
         ``throw_on_error`` is off (the default).
         """
-        error = self._validate_event(type, subject, session_id, emoji)
+        error = self._validate_event(type, subject, session_id, message, emoji)
         if error is not None:
             self._fail(LogDuckError(error, status=400), f"validation failed: {error}")
             return None
@@ -245,7 +256,7 @@ class LogDuckClient(_BaseClient):
         # One key for the whole call, reused across retries: that is what makes
         # a retry safe, since the server deduplicates on it.
         key = _idempotency_key()
-        payload = self._payload(type, subject, session_id, time, data, emoji)
+        payload = self._payload(type, subject, session_id, message, time, data, emoji)
 
         for attempt in range(1, self._max_attempts + 1):
             try:
@@ -308,18 +319,19 @@ class AsyncLogDuckClient(_BaseClient):
         *,
         subject: Optional[str] = None,
         session_id: Optional[str] = None,
+        message: Optional[str] = None,
         time: Optional[Union[datetime, str]] = None,
         data: Optional[Mapping[str, Any]] = None,
         emoji: Optional[str] = None,
     ) -> Optional[EventResponse]:
         """Send one event. See :meth:`LogDuckClient.send`."""
-        error = self._validate_event(type, subject, session_id, emoji)
+        error = self._validate_event(type, subject, session_id, message, emoji)
         if error is not None:
             self._fail(LogDuckError(error, status=400), f"validation failed: {error}")
             return None
 
         key = _idempotency_key()
-        payload = self._payload(type, subject, session_id, time, data, emoji)
+        payload = self._payload(type, subject, session_id, message, time, data, emoji)
 
         for attempt in range(1, self._max_attempts + 1):
             try:

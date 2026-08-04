@@ -134,6 +134,7 @@ def test_rejects_an_empty_type_without_touching_the_network(client: LogDuckClien
         ("type", {"type": "a" * 101}),
         ("subject", {"type": "ok", "subject": "a" * 501}),
         ("session_id", {"type": "ok", "session_id": "a" * 257}),
+        ("message", {"type": "ok", "message": "a" * 501}),
         ("emoji", {"type": "ok", "emoji": "a" * 11}),
     ],
 )
@@ -143,6 +144,43 @@ def test_rejects_over_long_fields(field: str, kwargs: dict, client: LogDuckClien
 
     assert client.send(**kwargs) is None
     assert not route.called
+
+
+@respx.mock
+def test_sends_cloudevents_wire_names(client: LogDuckClient) -> None:
+    """The wire names are the contract, and they are not the kwarg names.
+
+    A CloudEvents extension attribute name must be lowercase alphanumeric, so
+    ``session_id`` goes out as ``sessionid``. The server discards what it does
+    not recognise rather than erroring, so getting this wrong loses the field
+    silently - which is why the snake_case spelling is asserted absent too.
+    """
+    route = respx.post(ENDPOINT).mock(return_value=accepted())
+
+    client.send(
+        "order.placed",
+        subject="order_9127",
+        session_id="sess_8f21c",
+        message="Order placed on the Pro plan",
+    )
+
+    body = json.loads(route.calls[0].request.content)
+    assert body["sessionid"] == "sess_8f21c"
+    assert body["message"] == "Order placed on the Pro plan"
+    assert "session_id" not in body
+    assert "sessionId" not in body
+    assert "metadata" not in body
+
+
+@respx.mock
+def test_omits_message_and_sessionid_when_unset(client: LogDuckClient) -> None:
+    route = respx.post(ENDPOINT).mock(return_value=accepted())
+
+    client.send("order.placed")
+
+    body = json.loads(route.calls[0].request.content)
+    assert "message" not in body
+    assert "sessionid" not in body
 
 
 def test_flags_an_api_key_without_the_ld_prefix() -> None:

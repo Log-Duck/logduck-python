@@ -14,7 +14,7 @@ from .models import EventResponse
 
 #: Single source of truth for the version — pyproject.toml reads it from here,
 #: and the release workflow checks the git tag against it.
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 
 __all__ = [
     "AsyncLogDuckClient",
